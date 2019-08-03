@@ -114,10 +114,12 @@ class Secp256k1(Secp256k1_base):
 
         self.gens = lib.secp256k1_bulletproof_generators_create(self.ctx, self.GENERATOR_G, 256)
 
-    def commit(self, value: int, blind) -> Commitment:
+    def commit(self, value: int, blind, asset=None) -> Commitment:
+        if asset == None:
+            asset = self.GENERATOR_H 
         obj = Commitment(self)
         res = lib.secp256k1_pedersen_commit(self.ctx, obj.commitment, bytes(blind.key), value,
-                                            self.GENERATOR_H, self.GENERATOR_G)
+                                            asset, self.GENERATOR_G)
         assert res, "Unable to commit"
         return obj
 
