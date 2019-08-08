@@ -186,20 +186,64 @@ class Secp256k1(Secp256k1_base):
         signature.append(rec_id_ptr[0])
         return signature
 
-    def bullet_proof(self, value: int, blind: SecretKey, nonce: SecretKey, extra_data: bytearray) -> RangeProof:
+    def bullet_proof(self, value: int, blind: SecretKey, nonce: SecretKey, extra_data: bytearray = bytearray()) -> RangeProof:
         proof_ptr = ffi.new("char []", MAX_PROOF_SIZE)
         proof_len_ptr = ffi.new("size_t *", MAX_PROOF_SIZE)
         blind_key = ffi.new("char []", bytes(blind.key))
         scratch = lib.secp256k1_scratch_space_create(self.ctx, 256 * MAX_WIDTH)
         res = lib.secp256k1_bulletproof_rangeproof_prove(
-            self.ctx, scratch, self.gens, proof_ptr, proof_len_ptr, ffi.NULL, ffi.NULL, ffi.NULL,
-            [value], ffi.NULL, [blind_key], ffi.NULL, 1, self.GENERATOR_H, 64, bytes(nonce.key), ffi.NULL,
-            bytes(extra_data), len(extra_data), ffi.NULL
+            self.ctx, 
+            scratch, 
+            self.gens, 
+            proof_ptr, 
+            proof_len_ptr, 
+            ffi.NULL, # multi-party: tau_x
+            ffi.NULL, # multi-party: t_one
+            ffi.NULL, # multi-party: t_two
+            [value],  # value: array of values committed by the Pedersen commitments
+            ffi.NULL, # array of minimum values to prove ranges above, or NULL for all-zeroes
+            [blind_key], # blind: array of blinding factors of the Pedersen commitments (cannot be NULL)
+            ffi.NULL, # commits: only for multi-party; array of pointers to commitments
+            1, # n_commits: number of entries in the `value` and `blind` arrays
+            self.GENERATOR_H, # value_gen: generator multiplied by value in pedersen commitments (cannot be NULL)
+            64, # nbits: number of bits proven for each range
+            bytes(nonce.key), # nonce: random 32-byte seed used to derive blinding factors (cannot be NULL)
+            ffi.NULL, # private_nonce: only for multi-party; random 32-byte seed used to derive private blinding factors
+            bytes(extra_data), 
+            len(extra_data), 
+            ffi.NULL
         )
         obj = RangeProof.from_bytearray(bytearray(ffi.buffer(proof_ptr, proof_len_ptr[0])))
         lib.secp256k1_scratch_space_destroy(scratch)
         assert res, "Unable to generate bulletproof"
         return obj
+
+    def bullet_proof_verify(self, proof: RangeProof, commit: Commitment, extra_data: bytearray = bytearray()) -> bool:
+        scratch = lib.secp256k1_scratch_space_create(self.ctx, 256 * MAX_WIDTH)
+
+        proof_bytes = ffi.new("char []", bytes(proof.proof))
+        # proof_bytes = ffi.new("char []", bytes(proof.to_bytearray()))
+
+        # hmmm, len(proof_bytes) 676, one byte extra than proof.proof_len -.-
+        # print("len(proof_bytes) proof.proof_len", len(proof_bytes), proof.proof_len)
+        res = lib.secp256k1_bulletproof_rangeproof_verify(
+            self.ctx,
+            scratch,
+            self.gens,
+            proof_bytes, # proof: byte-serialized rangeproof (cannot be NULL)
+            proof.proof_len,# proof.proof_len, # plen: length of the proof
+            ffi.NULL, # min_value: array of minimum values to prove ranges above, or NULL for all-zeroes
+            commit.commitment, # commit: array of pedersen commitment that this rangeproof is over (cannot be NULL)
+            1, # n_commits: number of commitments in the above array (cannot be 0)
+            64, # nbits: number of bits proven for each range
+            self.GENERATOR_H, # value_gen: generator multiplied by value in pedersen commitments (cannot be NULL)
+            bytes(extra_data), 
+            len(extra_data),
+        )
+
+        lib.secp256k1_scratch_space_destroy(scratch) # -> void
+
+        return res == 1
 
     def bullet_proof_multisig_1(self, value: int, blind: SecretKey, commit: Commitment, common_nonce: SecretKey,
                                 nonce: SecretKey, extra_data: bytearray) -> (PublicKey, PublicKey):
