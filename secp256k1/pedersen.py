@@ -116,7 +116,7 @@ class Secp256k1(Secp256k1_base):
 
     def commit(self, value: int, blind, asset=None) -> Commitment:
         if asset == None:
-            asset = self.GENERATOR_H 
+            asset = self.GENERATOR_H
         obj = Commitment(self)
         res = lib.secp256k1_pedersen_commit(self.ctx, obj.commitment, bytes(blind.key), value,
                                             asset, self.GENERATOR_G)
@@ -192,25 +192,25 @@ class Secp256k1(Secp256k1_base):
         blind_key = ffi.new("char []", bytes(blind.key))
         scratch = lib.secp256k1_scratch_space_create(self.ctx, 256 * MAX_WIDTH)
         res = lib.secp256k1_bulletproof_rangeproof_prove(
-            self.ctx, 
-            scratch, 
-            self.gens, 
-            proof_ptr, 
-            proof_len_ptr, 
-            ffi.NULL, # multi-party: tau_x
-            ffi.NULL, # multi-party: t_one
-            ffi.NULL, # multi-party: t_two
+            self.ctx,
+            scratch,
+            self.gens,
+            proof_ptr,
+            proof_len_ptr,
+            ffi.NULL,  # multi-party: tau_x
+            ffi.NULL,  # multi-party: t_one
+            ffi.NULL,  # multi-party: t_two
             [value],  # value: array of values committed by the Pedersen commitments
-            ffi.NULL, # array of minimum values to prove ranges above, or NULL for all-zeroes
-            [blind_key], # blind: array of blinding factors of the Pedersen commitments (cannot be NULL)
-            ffi.NULL, # commits: only for multi-party; array of pointers to commitments
-            1, # n_commits: number of entries in the `value` and `blind` arrays
-            self.GENERATOR_H, # value_gen: generator multiplied by value in pedersen commitments (cannot be NULL)
-            64, # nbits: number of bits proven for each range
-            bytes(nonce.key), # nonce: random 32-byte seed used to derive blinding factors (cannot be NULL)
-            ffi.NULL, # private_nonce: only for multi-party; random 32-byte seed used to derive private blinding factors
-            bytes(extra_data), 
-            len(extra_data), 
+            ffi.NULL,  # array of minimum values to prove ranges above, or NULL for all-zeroes
+            [blind_key],  # blind: array of blinding factors of the Pedersen commitments (cannot be NULL)
+            ffi.NULL,  # commits: only for multi-party; array of pointers to commitments
+            1,  # n_commits: number of entries in the `value` and `blind` arrays
+            self.GENERATOR_H,  # value_gen: generator multiplied by value in pedersen commitments (cannot be NULL)
+            64,  # nbits: number of bits proven for each range
+            bytes(nonce.key),  # nonce: random 32-byte seed used to derive blinding factors (cannot be NULL)
+            ffi.NULL,  # private_nonce: only for multi-party; random 32-byte seed used to derive private blinding factors
+            bytes(extra_data),
+            len(extra_data),
             ffi.NULL
         )
         obj = RangeProof.from_bytearray(bytearray(ffi.buffer(proof_ptr, proof_len_ptr[0])))
@@ -230,18 +230,18 @@ class Secp256k1(Secp256k1_base):
             self.ctx,
             scratch,
             self.gens,
-            proof_bytes, # proof: byte-serialized rangeproof (cannot be NULL)
-            proof.proof_len,# proof.proof_len, # plen: length of the proof
-            ffi.NULL, # min_value: array of minimum values to prove ranges above, or NULL for all-zeroes
-            commit.commitment, # commit: array of pedersen commitment that this rangeproof is over (cannot be NULL)
-            1, # n_commits: number of commitments in the above array (cannot be 0)
-            64, # nbits: number of bits proven for each range
-            self.GENERATOR_H, # value_gen: generator multiplied by value in pedersen commitments (cannot be NULL)
-            bytes(extra_data), 
+            proof_bytes,  # proof: byte-serialized rangeproof (cannot be NULL)
+            proof.proof_len,  # proof.proof_len, # plen: length of the proof
+            ffi.NULL,  # min_value: array of minimum values to prove ranges above, or NULL for all-zeroes
+            commit.commitment,  # commit: array of pedersen commitment that this rangeproof is over (cannot be NULL)
+            1,  # n_commits: number of commitments in the above array (cannot be 0)
+            64,  # nbits: number of bits proven for each range
+            self.GENERATOR_H,  # value_gen: generator multiplied by value in pedersen commitments (cannot be NULL)
+            bytes(extra_data),
             len(extra_data),
         )
 
-        lib.secp256k1_scratch_space_destroy(scratch) # -> void
+        lib.secp256k1_scratch_space_destroy(scratch)  # -> void
 
         return res == 1
 
