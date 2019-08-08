@@ -8,8 +8,20 @@ MAX_PROOF_SIZE = 675
 PROOF_MSG_SIZE = 64
 MAX_WIDTH = 1 << 20
 
+GENERATOR_H = ffi.new("secp256k1_generator *", [bytes([
+    0x50, 0x92, 0x9b, 0x74, 0xc1, 0xa0, 0x49, 0x54,
+    0xb7, 0x8b, 0x4b, 0x60, 0x35, 0xe9, 0x7a, 0x5e,
+    0x07, 0x8a, 0x5a, 0x0f, 0x28, 0xec, 0x96, 0xd5,
+    0x47, 0xbf, 0xee, 0x9a, 0xce, 0x80, 0x3a, 0xc0,
+    0x31, 0xd3, 0xc6, 0x86, 0x39, 0x73, 0x92, 0x6e,
+    0x04, 0x9e, 0x63, 0x7c, 0xb1, 0xb5, 0xf4, 0x0a,
+    0x36, 0xda, 0xc2, 0x8a, 0xf1, 0x76, 0x69, 0x68,
+    0xc3, 0x0c, 0x23, 0x13, 0xf3, 0xa3, 0x89, 0x04
+])])
 
 # Pedersen Commitment xG+vH
+
+
 class Commitment:
     def __init__(self, secp):
         assert isinstance(secp, Secp256k1)
@@ -101,25 +113,14 @@ class Secp256k1(Secp256k1_base):
             0xfd, 0x17, 0xb4, 0x48, 0xa6, 0x85, 0x54, 0x19,
             0x9c, 0x47, 0xd0, 0x8f, 0xfb, 0x10, 0xd4, 0xb8
         ])])
-        self.GENERATOR_H = ffi.new("secp256k1_generator *", [bytes([
-            0x50, 0x92, 0x9b, 0x74, 0xc1, 0xa0, 0x49, 0x54,
-            0xb7, 0x8b, 0x4b, 0x60, 0x35, 0xe9, 0x7a, 0x5e,
-            0x07, 0x8a, 0x5a, 0x0f, 0x28, 0xec, 0x96, 0xd5,
-            0x47, 0xbf, 0xee, 0x9a, 0xce, 0x80, 0x3a, 0xc0,
-            0x31, 0xd3, 0xc6, 0x86, 0x39, 0x73, 0x92, 0x6e,
-            0x04, 0x9e, 0x63, 0x7c, 0xb1, 0xb5, 0xf4, 0x0a,
-            0x36, 0xda, 0xc2, 0x8a, 0xf1, 0x76, 0x69, 0x68,
-            0xc3, 0x0c, 0x23, 0x13, 0xf3, 0xa3, 0x89, 0x04
-        ])])
+        self.GENERATOR_H = GENERATOR_H
 
         self.gens = lib.secp256k1_bulletproof_generators_create(self.ctx, self.GENERATOR_G, 256)
 
-    def commit(self, value: int, blind, asset=None) -> Commitment:
-        if asset == None:
-            asset = self.GENERATOR_H
+    def commit(self, value: int, blind, value_gen=GENERATOR_H) -> Commitment:
         obj = Commitment(self)
         res = lib.secp256k1_pedersen_commit(self.ctx, obj.commitment, bytes(blind.key), value,
-                                            asset, self.GENERATOR_G)
+                                            value_gen, self.GENERATOR_G)
         assert res, "Unable to commit"
         return obj
 
@@ -186,7 +187,7 @@ class Secp256k1(Secp256k1_base):
         signature.append(rec_id_ptr[0])
         return signature
 
-    def bullet_proof(self, value: int, blind: SecretKey, nonce: SecretKey, extra_data: bytearray = bytearray()) -> RangeProof:
+    def bullet_proof(self, value: int, blind: SecretKey, nonce: SecretKey, extra_data: bytearray = bytearray(), value_gen=GENERATOR_H) -> RangeProof:
         proof_ptr = ffi.new("char []", MAX_PROOF_SIZE)
         proof_len_ptr = ffi.new("size_t *", MAX_PROOF_SIZE)
         blind_key = ffi.new("char []", bytes(blind.key))
@@ -205,7 +206,7 @@ class Secp256k1(Secp256k1_base):
             [blind_key],  # blind: array of blinding factors of the Pedersen commitments (cannot be NULL)
             ffi.NULL,  # commits: only for multi-party; array of pointers to commitments
             1,  # n_commits: number of entries in the `value` and `blind` arrays
-            self.GENERATOR_H,  # value_gen: generator multiplied by value in pedersen commitments (cannot be NULL)
+            value_gen,  # value_gen: generator multiplied by value in pedersen commitments (cannot be NULL)
             64,  # nbits: number of bits proven for each range
             bytes(nonce.key),  # nonce: random 32-byte seed used to derive blinding factors (cannot be NULL)
             ffi.NULL,  # private_nonce: only for multi-party; random 32-byte seed used to derive private blinding factors
@@ -218,7 +219,7 @@ class Secp256k1(Secp256k1_base):
         assert res, "Unable to generate bulletproof"
         return obj
 
-    def bullet_proof_verify(self, proof: RangeProof, commit: Commitment, extra_data: bytearray = bytearray()) -> bool:
+    def bullet_proof_verify(self, proof: RangeProof, commit: Commitment, extra_data: bytearray = bytearray(), value_gen=GENERATOR_H) -> bool:
         scratch = lib.secp256k1_scratch_space_create(self.ctx, 256 * MAX_WIDTH)
 
         proof_bytes = ffi.new("char []", bytes(proof.proof))
@@ -236,7 +237,7 @@ class Secp256k1(Secp256k1_base):
             commit.commitment,  # commit: array of pedersen commitment that this rangeproof is over (cannot be NULL)
             1,  # n_commits: number of commitments in the above array (cannot be 0)
             64,  # nbits: number of bits proven for each range
-            self.GENERATOR_H,  # value_gen: generator multiplied by value in pedersen commitments (cannot be NULL)
+            value_gen,  # value_gen: generator multiplied by value in pedersen commitments (cannot be NULL)
             bytes(extra_data),
             len(extra_data),
         )

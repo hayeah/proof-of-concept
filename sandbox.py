@@ -1,11 +1,12 @@
 from secp256k1 import FLAG_ALL
 from secp256k1.key import SecretKey, PublicKey
-from secp256k1.pedersen import Secp256k1
+from secp256k1.pedersen import Secp256k1, GENERATOR_H
 import grin.aggsig as aggsig
 
 from binascii import hexlify
 from os import urandom
-from _libsecp256k1 import ffi, lib
+
+from secp256k1 import ffi, lib
 
 from grin.util import hasher
 from hashlib import sha256
@@ -55,7 +56,7 @@ class Generator:
     @staticmethod
     def from_asset_symbol(secp: Secp256k1, symbol: str):
         data = symbol.encode("utf-8")
-        seed = hasher(data) # blake2b
+        seed = hasher(data)  # blake2b
         return Generator.from_seed(secp, seed)
 
 
@@ -72,7 +73,68 @@ def pick_generator():
     g2 = Generator.from_bytearray(secp, data)
     print(g.to_hex(secp), g2.to_hex(secp))
 
+
+def bulletproof_rangeproof():
+    secp = Secp256k1(None, FLAG_ALL)
+
+    # NOTE: rangeproof for different value generators must be created & verified separately
+
+    # question: how does node aggregate range proofs when cut-through for the
+    # whole block? one range proof per block or per tx?
+    #
+    # answer: it looks like one rangeproof per output...
+
+    # question: is there a way that grin takes advantage of aggregated
+    # rangeproof if multiple outputs are by the same author?
+
+    # question: how is MAX_PROOF_SIZE=675 calculated?
+    # question: how is scratch space calculated (256 * MAX_WIDTH)?
+
+    # aH + oG (receiver)
+    value = 100
+    okey = SecretKey.random(secp)
+    opubkey = okey.to_public_key(secp)  # oG
+    output = secp.commit(value, okey)  # aH + oG
+
+    nonce = SecretKey.random(secp)
+    # proof = secp.bullet_proof(value, okey, nonce, bytearray())
+    proof = secp.bullet_proof(value, okey, nonce)
+
+    # FFI Note: deref apparently point to the same data
+    # print("*commit.commitment", commit, ffi.addressof(commit))
+    # print("commit.commitment", output.commitment, output.commitment+0) # +0 to reveal the pointer
+
+    print("proof:", proof.to_hex())
+    print("proof length:", len(proof.to_bytearray()))  # 675 bytes
+
+    # verify
+    print("valid for H:", secp.bullet_proof_verify(proof, output))
+
+    # should not be able to generate proof with negative commitment
+
+    # commitment with H should not validate against bullet proof with Q
+    Q = Generator.from_asset_symbol(secp, "QTUM").gen
+    # qproof = secp.bullet_proof(value, okey, nonce, value_gen=Q)
+    # print("valid for Q:", secp.bullet_proof_verify(qproof, output, value_gen=Q))
+
+    # aQ + oG (receiver)
+    value = 100
+    qokey = SecretKey.random(secp)
+    # opubkey = qokey.to_public_key(secp)  # oG
+    qoutput = secp.commit(value, qokey, value_gen=Q)
+    nonce = SecretKey.random(secp)
+    # proof = secp.bullet_proof(value, okey, nonce, bytearray())
+    qproof = secp.bullet_proof(value, qokey, nonce, value_gen=Q)
+    print("qproof:", qproof.to_hex())
+    print("qproof length:", len(qproof.to_bytearray()))  # 675 bytes
+    print("valid for Q:", secp.bullet_proof_verify(qproof, qoutput, value_gen=Q))
+
+
 def tx_with_multiple_assets():
+    # bullet proof
+    # mint tx
+    # destroy tx
+
     secp = Secp256k1(None, FLAG_ALL)
 
     # generator for qtum asset
@@ -95,7 +157,7 @@ def tx_with_multiple_assets():
     # aQ + iG (sender)
     qikey = SecretKey.random(secp)  # qi
     # qipubkey = qikey.to_public_key(secp)  # qiG
-    qinput = secp.commit(10, qikey, asset=Q)  # aQ + qiG
+    qinput = secp.commit(10, qikey, value_gen=Q)  # aQ + qiG
 
     # aH + oG (receiver)
     okey = SecretKey.random(secp)
@@ -105,7 +167,7 @@ def tx_with_multiple_assets():
     # aQ + oG (receiver)
     qokey = SecretKey.random(secp)  # qo
     qopubkey = qokey.to_public_key(secp)  # qoG
-    qoutput = secp.commit(10, qokey, asset=Q)  # aQ + qoG
+    qoutput = secp.commit(10, qokey, value_gen=Q)  # aQ + qoG
 
     # The underlying secp256k1_pedersen_commit_sum function checks if output is INF.
     # zero = secp.commit_sum([output], [output])
@@ -125,12 +187,12 @@ def tx_with_multiple_assets():
 
     inonce = SecretKey.random(secp)
     inonce_pubkey = inonce.to_public_key(secp)
-    sigikey = ikey.negate(secp) # input should be negated for signatures
+    sigikey = ikey.negate(secp)  # input should be negated for signatures
     sigipubkey = sigikey.to_public_key(secp)
 
     qinonce = SecretKey.random(secp)
     qinonce_pubkey = qinonce.to_public_key(secp)
-    sigqikey = qikey.negate(secp) # input should be negated for signatures
+    sigqikey = qikey.negate(secp)  # input should be negated for signatures
     sigqipubkey = sigqikey.to_public_key(secp)
 
     ononce = SecretKey.random(secp)  # nonces are also based on generator G
@@ -170,6 +232,7 @@ def tx_with_multiple_assets():
 
     print("signature pubkey agree with committment excess:",
           kernel_pubkey.to_hex(secp) == pubkeysum.to_hex(secp))
+
 
 def main():
     # TODO: implement change
@@ -231,7 +294,7 @@ def main():
 
     inonce = SecretKey.random(secp)
     inonce_pubkey = inonce.to_public_key(secp)
-    sigikey = ikey.negate(secp) # input should be negated for signatures
+    sigikey = ikey.negate(secp)  # input should be negated for signatures
     sigipubkey = sigikey.to_public_key(secp)
 
     ononce = SecretKey.random(secp)  # nonces are also based on generator G
@@ -261,10 +324,10 @@ def main():
     print("aggsig is valid", aggsig.verify(
         secp, signature, pubkeysum, fee, lock_height))
 
-    # QUESTION: 
+    # QUESTION:
 
     # Finally, validator should check that signature is signed by kernel key.
-    # 
+    #
     # kernel_pubkey and pubkeysum are the same thing, calculated in two different ways.
     #
     # kernel_pubkey is the excess by summing input/output commitments (from transaction)
@@ -276,5 +339,6 @@ def main():
 
 if __name__ == "__main__":
     # spick_generator()
-    tx_with_multiple_assets()
+    # tx_with_multiple_assets()
     # main()
+    bulletproof_rangeproof()
